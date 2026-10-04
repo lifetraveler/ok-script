@@ -11,7 +11,10 @@ from typing import Optional
 
 from ok.util.file import ensure_dir_for_file, get_relative_path
 
-_ok_log_formatter = logging.Formatter('%(asctime)s %(levelname)s %(threadName)s %(message)s')
+# _ok_log_formatter = logging.Formatter('%(asctime)s %(levelname)s %(threadName)s %(message)s')
+_ok_log_formatter = logging.Formatter(
+    '%(asctime)s %(levelname)s %(threadName)s %(filename)s:%(lineno)d %(funcName)s %(message)s'
+)
 _ok_logger = logging.getLogger("ok")
 _OK_STDOUT_HANDLER = "_ok_stdout_handler"
 _file_listener = None
@@ -37,20 +40,20 @@ class Logger:
         self.name = name.split('.')[-1]
 
     def debug(self, message):
-        self.logger.debug(f"{self.name}:{message}")
+        self.logger.debug(f"{self.name}:{message}", stacklevel=2)
 
     def info(self, message):
-        self.logger.info(f"{self.name}:{message}")
+        self.logger.info(f"{self.name}:{message}", stacklevel=2)
 
     def warning(self, message):
-        self.logger.warning(f"{self.name}:{message}")
+        self.logger.warning(f"{self.name}:{message}", stacklevel=2)
 
     def error(self, message, exception: Optional[Exception] = None):
         stack_trace_str = self.exception_to_str(exception)
-        self.logger.error(f"{self.name}:{message} {stack_trace_str}")
+        self.logger.error(f"{self.name}:{message} {stack_trace_str}", stacklevel=2)
 
     def critical(self, message):
-        self.logger.critical(f"{self.name}:{message}")
+        self.logger.critical(f"{self.name}:{message}", stacklevel=2)
 
     @staticmethod
     def call_stack() -> str:

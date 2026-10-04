@@ -234,6 +234,132 @@ class ExecutorOperation:
         self.swipe(int(self.width * from_x), int(self.height * from_y), int(self.width * to_x),
                    int(self.height * to_y), duration, settle_time=settle_time)
 
+    # ==================================================================
+    # 手势：缩放 / Fling / 拖拽 / 长按 / 双击 / 多点滑动
+    # 参考 click 的集成方式：坐标归一 + 调试框 + reset_scene + after_sleep
+    # ==================================================================
+    def _resolve_point(self, x, y=None):
+        """
+        归一手势坐标，对齐 click 的坐标语义：
+        Box → 框内随机点；(x, y) 元素均在 0~1 → 相对屏幕；否则按像素。
+        :return: (x, y) 像素点
+        """
+        if isinstance(x, Box):
+            return x.relative_with_variance(0.5, 0.5)
+        if isinstance(x, (tuple, list)) and len(x) == 2 and all(
+                isinstance(v, (int, float)) and 0 < v < 1 for v in x):
+            return int(self.width * x[0]), int(self.height * x[1])
+        if isinstance(x, (tuple, list)) and len(x) == 2:
+            return round(x[0]), round(x[1])
+        if 0 < x < 1 or (y is not None and 0 < y < 1):
+            return int(self.width * x), int(self.height * (y if y is not None else x))
+        return round(x), round(y if y is not None else 0)
+
+    def _emit_gesture_box(self, key, points):
+        pts = [p for p in points if p is not None]
+        if not pts:
+            return
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        box = Box(min(xs), min(ys), max(max(xs) - min(xs), 10), max(max(ys) - min(ys), 10),
+                  name=key, confidence=-1)
+        communicate.emit_draw_box(key, [box], "green")
+
+    def _gesture(self, method_name, args, key, after_sleep=0, **kwargs):
+        """统一手势下发：调试框 + reset_scene + 交互层分发 + after_sleep。
+        交互层不支持该手势时告警跳过，不抛异常（对齐 _require_u2 的降级策略）。"""
+        points = [a for a in args if isinstance(a, (tuple, list)) and len(a) == 2
+                  and all(isinstance(v, (int, float)) for v in a)]
+        self._emit_gesture_box(key, points)
+        self.executor.reset_scene()
+        interaction = self.executor.interaction
+        fn = getattr(interaction, method_name, None)
+        if not callable(fn):
+            self.logger.warning(
+                f'{method_name} not supported by {type(interaction).__name__}, skipped')
+            return False
+        fn(*args, **kwargs)
+        if after_sleep > 0:
+            self.sleep(after_sleep)
+        return True
+
+    def scroll_page(self, direction='forward', percent=0.6, duration=0.3, after_sleep=0.1,
+                    settle_time=0):
+        """按页滚动屏幕内容（ADB 页面滚动语义，区别于滚轮 scroll）。"""
+        return self._gesture('scroll_page', (), 'scroll_page', after_sleep=after_sleep,
+                      direction=direction, percent=percent, duration=duration,
+                      settle_time=settle_time)
+
+    def scroll_horizontal(self, direction='right', percent=0.6, duration=0.3, after_sleep=0.1):
+        """水平滚动屏幕内容。"""
+        return self._gesture('scroll_horizontal', (), 'scroll_horizontal', after_sleep=after_sleep,
+                      direction=direction, percent=percent, duration=duration)
+
+    def fling(self, direction='forward', percent=0.8, duration=0.02, after_sleep=0.5):
+        """快速滑动（带惯性）。"""
+        return self._gesture('fling', (), 'fling', after_sleep=after_sleep,
+                      direction=direction, percent=percent, duration=duration)
+
+    def pinch_in(self, percent=50, steps=20, after_sleep=0.5):
+        """双指捏合（缩小）。"""
+        return self._gesture('pinch_in', (), 'pinch_in', after_sleep=after_sleep,
+                      percent=percent, steps=steps)
+
+    def pinch_out(self, percent=50, steps=20, after_sleep=0.5):
+        """双指张开（放大）。"""
+        return self._gesture('pinch_out', (), 'pinch_out', after_sleep=after_sleep,
+                      percent=percent, steps=steps)
+
+    def zoom(self, zoom_in=True, percent=50, steps=20, after_sleep=0.5):
+        """统一缩放入口。"""
+        return self._gesture('zoom', (), 'zoom', after_sleep=after_sleep,
+                      zoom_in=zoom_in, percent=percent, steps=steps)
+
+    def two_finger_gesture(self, start1, start2, end1, end2, duration=0.5, after_sleep=0.5):
+        """通用双指手势。start1/start2/end1/end2: 像素、相对 0~1 或 Box。
+        四个点打包为四个元组位置参数（ADB 端签名 (start1, start2, end1, end2)），不拍平。"""
+        p1 = self._resolve_point(start1)
+        p2 = self._resolve_point(start2)
+        p3 = self._resolve_point(end1)
+        p4 = self._resolve_point(end2)
+        return self._gesture('two_finger_gesture', (p1, p2, p3, p4), 'two_finger_gesture',
+                      after_sleep=after_sleep, duration=duration)
+
+    def drag(self, from_x, from_y, to_x, to_y, duration=1.0, settle_time=0.15, after_sleep=0.5):
+        """拖拽：支持像素、相对 0~1、Box。
+        四个标量按 ADB 端签名 (from_x, from_y, to_x, to_y) 展开为位置参数。"""
+        p1 = self._resolve_point(from_x, from_y)
+        p2 = self._resolve_point(to_x, to_y)
+        return self._gesture('drag', (*p1, *p2), 'drag',
+                      after_sleep=after_sleep, duration=duration, settle_time=settle_time)
+
+    def long_click(self, x, y=None, duration=1.0, after_sleep=0.5, name=None):
+        """长按：支持像素、相对 0~1、Box。"""
+        p = self._resolve_point(x, y)
+        return self._gesture('long_click', p, name or 'long_click',
+                      after_sleep=after_sleep, duration=duration)
+
+    def double_click(self, x, y=None, interval=0.1, after_sleep=0.5, name=None):
+        """双击：支持像素、相对 0~1、Box。"""
+        p = self._resolve_point(x, y)
+        return self._gesture('double_click', p, name or 'double_click',
+                      after_sleep=after_sleep, interval=interval)
+
+    def swipe_points(self, points, duration=0.2, after_sleep=0.5):
+        """多点连续滑动：[(x, y), ...]，元素可为像素、相对 0~1、Box。
+        points 作为单个列表参数下发（u2 swipe_points(points, duration)），不拍平。"""
+        pts = []
+        for p in points:
+            if isinstance(p, Box):
+                pts.append(p.relative_with_variance(0.5, 0.5))
+            elif isinstance(p, (tuple, list)) and len(p) == 2 and all(
+                    isinstance(v, (int, float)) and (0 < v < 1) for v in p):
+                pts.append((int(self.width * p[0]), int(self.height * p[1])))
+            else:
+                pts.append(tuple(p))
+        return self._gesture('swipe_points', (tuple(pts),), 'swipe_points',
+                      after_sleep=after_sleep, duration=duration)
+
     def input_text(self, text):
         name = f"input_text_{text}"
         communicate.emit_draw_box(name, self.box_of_screen(0.5, 0.5, width=0.01, height=0.01, name=name, confidence=-1),

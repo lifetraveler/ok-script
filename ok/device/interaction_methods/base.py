@@ -34,6 +34,39 @@ class BaseInteraction:
     def swipe(self, from_x, from_y, to_x, to_y, duration, settle_time=0):
         pass
 
+    def scroll_page(self, direction="forward", percent=0.6, duration=0.3, settle_time=0):
+        pass
+
+    def fling(self, direction="forward", percent=0.8, duration=0.02):
+        pass
+
+    def scroll_horizontal(self, direction="right", percent=0.6, duration=0.3):
+        pass
+
+    def pinch_in(self, percent=50, steps=20):
+        pass
+
+    def pinch_out(self, percent=50, steps=20):
+        pass
+
+    def zoom(self, zoom_in=True, percent=50, steps=20):
+        pass
+
+    def two_finger_gesture(self, start1, start2, end1, end2, duration=0.5):
+        pass
+
+    def drag(self, from_x, from_y, to_x, to_y, duration=1.0, settle_time=0.15):
+        self.swipe(from_x, from_y, to_x, to_y, duration, settle_time)
+
+    def long_click(self, x, y, duration=1.0):
+        pass
+
+    def double_click(self, x, y, interval=0.1):
+        pass
+
+    def swipe_points(self, points, duration=0.2):
+        pass
+
     def click(self, x=-1, y=-1, move_back=False, name=None, move=move, down_time=0.05, key="left"):
         pass
 
